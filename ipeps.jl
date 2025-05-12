@@ -5,6 +5,34 @@ using Optim
 
 const dim = 2
 
+Zygote.@adjoint LinearAlgebra.svd(A) = svd_back(A)
+
+function svd_back(A; η = 1e-40)
+    U, S, V = svd(A)
+    (U, S, V), function (Δ)
+        ΔA = Δ[2] === nothing ? zeros(eltype(A), size(A)...) : U * Diagonal(Δ[2]) * V'
+        if Δ[1] !== nothing || Δ[3] !== nothing
+            S² = S .^ 2
+            invS = @. S / (S² + η)
+            F = S²' .- S²
+            @. F /= (F ^ 2 + η)
+            if Δ[1] !== nothing
+                J = F .* (U' * Δ[1])
+                ΔA .+= U * (J .+ J') * Diagonal(S) * V'
+                ΔA .+= (I - U * U') * Δ[1] * Diagonal(invS) * V'
+            end
+            if Δ[3] !== nothing
+                K = F .* (V' * Δ[3])
+                ΔA .+= U * Diagonal(S) * (K .+ K') * V'
+                L = Diagonal(diag(V' * Δ[3]))
+                ΔA .+= 0.5 .* U * Diagonal(invS) * (L' .- L) * V'
+                ΔA .+= U * Diagonal(invS) * Δ[3]' * (I - V * V')
+            end
+        end
+        (ΔA,)
+    end
+end
+
 function symmetrize(x)
     x += permutedims(x, (1, 4, 3, 2, 5)) # left-right
     x += permutedims(x, (3, 2, 1, 4, 5)) # up-down
@@ -14,8 +42,8 @@ function symmetrize(x)
 end
 
 function initialize(a, χ)
-    corner = randn(χ, χ)
-    edge = randn(χ, size(a, 1), χ)
+    corner = randn(ComplexF64, χ, χ)
+    edge = randn(ComplexF64, χ, size(a, 1), χ)
     corner += corner'
     edge += permutedims(conj.(edge), (3, 2, 1))
     corner, edge
@@ -85,7 +113,7 @@ function vipeps(ipeps, h; χ = 20, tol = 1e-10, f_tol = 1e-8, maxit = 100)
 end
 
 function main()
-    ipeps = symmetrize(randn(dim, dim, dim, dim, 2))
+    ipeps = symmetrize(randn(ComplexF64, dim, dim, dim, dim, 2))
     σx = [0.0 1.0; 1.0 0.0]
     σy = [0.0 -1.0im; 1.0im 0.0]
     σz = [1.0 0.0; 0.0 -1.0]
