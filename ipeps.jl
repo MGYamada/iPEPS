@@ -44,8 +44,8 @@ end
 function initialize(a, χ)
     corner = randn(ComplexF64, χ, χ)
     edge = randn(ComplexF64, χ, size(a, 1), χ)
-    corner += corner'
-    edge += permutedims(conj.(edge), (3, 2, 1))
+    corner += transpose(corner)
+    edge += ein"ijk -> kji"(edge)
     corner, edge
 end
 
@@ -69,8 +69,8 @@ function ctmrg(a, rt, χ, D; tol = 1e-10, maxit = 100)
         vals = s ./ s[1]
 
         # indexperm_symmetrize
-        corner += corner'
-        edge += ein"ijk -> kji"(conj.(edge))
+        corner += transpose(corner)
+        edge += ein"ijk -> kji"(edge)
 
         # normalize
         corner /= norm(corner)
@@ -107,7 +107,7 @@ end
 
 function vipeps(ipeps, h; χ = 20, tol = 1e-10, f_tol = 1e-8, maxit = 100)
     f(x) = real(energy(h, x, χ; tol = tol, maxit = maxit))
-    res = optimize(f, f', ipeps, LBFGS(), Optim.Options(show_trace = true); inplace = false)
+    res = optimize(f, f', ipeps, LBFGS(), Optim.Options(show_trace = true, f_tol = f_tol); inplace = false)
     println(res)
     println("energy: ", minimum(res))
 end
@@ -119,7 +119,7 @@ function main()
     σz = [1.0 0.0; 0.0 -1.0]
     h = ein"ij, kl -> ijkl"(σz, σz) .- ein"ij, kl -> ijkl"(σx, σx) .- ein"ij, kl -> ijkl"(σy, σy)
     h = ein"ijcd, kc, ld -> ijkl"(h, σx, σx')
-    vipeps(ipeps, real.(h ./ 2))
+    vipeps(ipeps, h ./ 2)
 end
 
 main()
