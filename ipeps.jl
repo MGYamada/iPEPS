@@ -105,7 +105,7 @@ function expectationvalue(h, ap, rt)
     e / n
 end
 
-function vipeps(ipeps, h; χ = 40, tol = 1e-12, f_tol = 1e-8, maxit = 100)
+function vipeps(ipeps, h; χ = 30, tol = 1e-12, f_tol = 1e-8, maxit = 100)
     rt = initialize(size(ipeps, 1) ^ 2, χ)
     function f(x)
         e, rt = energy(rt, h, x, χ; tol = tol, maxit = maxit)
