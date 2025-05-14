@@ -41,15 +41,15 @@ function symmetrize(x)
     x / norm(x)
 end
 
-function initialize(a, χ)
+function initialize(s, χ)
     corner = randn(ComplexF64, χ, χ)
-    edge = randn(ComplexF64, χ, size(a, 1), χ)
+    edge = randn(ComplexF64, χ, s, χ)
     corner += transpose(corner)
     edge += ein"ijk -> kji"(edge)
     corner, edge
 end
 
-function ctmrg(a, rt, χ, D; tol = 1e-10, maxit = 100)
+function ctmrg(a, rt, χ, D; tol = 1e-12, maxit = 100)
     corner, edge = rt
     valsold = zeros(χ * D)
     for i in 1 : maxit
@@ -84,7 +84,7 @@ function ctmrg(a, rt, χ, D; tol = 1e-10, maxit = 100)
     corner, edge
 end
 
-function energy(h, ipeps, χ; tol = 1e-10, maxit = 100)
+function energy(rt, h, ipeps, χ; tol = 1e-12, maxit = 100)
     D = size(ipeps, 1) ^ 2
     s = size(ipeps, 5)
     ipeps = symmetrize(ipeps)
@@ -92,8 +92,8 @@ function energy(h, ipeps, χ; tol = 1e-10, maxit = 100)
     ap = reshape(ap, D, D, D, D, s, s)
     a = ein"ijklaa -> ijkl"(ap)
 
-    rt = initialize(a, χ)
-    expectationvalue(h, ap, ctmrg(a, rt, χ, D; tol = tol, maxit = maxit))
+    rt = ctmrg(a, rt, χ, D; tol = tol, maxit = maxit)
+    expectationvalue(h, ap, rt), rt
 end
 
 function expectationvalue(h, ap, rt)
@@ -105,8 +105,12 @@ function expectationvalue(h, ap, rt)
     e / n
 end
 
-function vipeps(ipeps, h; χ = 20, tol = 1e-10, f_tol = 1e-8, maxit = 100)
-    f(x) = real(energy(h, x, χ; tol = tol, maxit = maxit))
+function vipeps(ipeps, h; χ = 40, tol = 1e-12, f_tol = 1e-8, maxit = 100)
+    rt = initialize(size(ipeps, 1) ^ 2, χ)
+    function f(x)
+        e, rt = energy(rt, h, x, χ; tol = tol, maxit = maxit)
+        real(e)
+    end
     res = optimize(f, f', ipeps, LBFGS(), Optim.Options(show_trace = true, f_tol = f_tol); inplace = false)
     println(res)
     println("energy: ", minimum(res))
