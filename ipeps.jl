@@ -2,6 +2,7 @@ using LinearAlgebra
 using OMEinsum
 using Zygote
 using Optim
+using KrylovKit
 
 const dim = 2
 
@@ -42,46 +43,63 @@ function symmetrize(x)
 end
 
 function initialize(a, χ)
-    corner = randn(ComplexF64, χ, χ)
-    edge = randn(ComplexF64, χ, size(a, 1), χ)
+    corner = randn(χ, χ)
+    edge = randn(χ, size(a, 1), χ)
     corner += transpose(corner)
     edge += ein"ijk -> kji"(edge)
     corner, edge
 end
 
-function ctmrg(a, rt, χ, D; tol = 1e-12, maxit = 100)
+function step(rt, a, χ, D)
     corner, edge = rt
-    valsold = zeros(χ * D)
-    for i in 1 : maxit
-        # growx
-        cp = ein"((ad, iba), dcl), jkcb -> ijlk"(corner, edge, edge, a) # fix later
-        tp = ein"iam, jkla -> ijklm"(edge, a)
+    # growx
+    cp = ein"((ad, iba), dcl), jkcb -> ijlk"(corner, edge, edge, a) # fix later
+    tp = ein"iam, jkla -> ijklm"(edge, a)
 
-        # renormalize
-        cpmat = reshape(cp, χ * D, χ * D)
-        cpmat += cpmat'
-        u, s, v = svd(cpmat)
-        z = reshape(u[:, 1 : χ], χ, D, χ)
+    # renormalize
+    cpmat = reshape(cp, χ * D, χ * D)
+    cpmat += cpmat'
+    u, s, v = svd(cpmat)
+    z = reshape(u[:, 1 : χ], χ, D, χ)
 
-        corner = ein"(abcd, abi), cdj -> ij"(cp, conj.(z), z)
-        edge = ein"(abjcd, abi), dck -> ijk"(tp, conj.(z), z)
+    corner = ein"(abcd, abi), cdj -> ij"(cp, conj.(z), z)
+    edge = ein"(abjcd, abi), dck -> ijk"(tp, conj.(z), z)
 
-        vals = s ./ s[1]
+    # indexperm_symmetrize
+    corner += transpose(corner)
+    edge += ein"ijk -> kji"(edge)
 
-        # indexperm_symmetrize
-        corner += transpose(corner)
-        edge += ein"ijk -> kji"(edge)
-
-        # normalize
-        corner /= norm(corner)
-        edge /= norm(edge)
-
-        if norm(vals .- valsold) < tol
-            break
-        end
-    end
+    # normalize
+    corner /= norm(corner)
+    edge /= norm(edge)
 
     corner, edge
+end
+
+function fixedpointbackward(next, g, args...)
+    _, back = pullback(next, g, args...)
+    back1 = x -> back(x)[1]
+    back2 = x -> back(x)[2 : end]
+    function (Δ)
+        grad, = linsolve(Δ; ishermitian = false) do x
+            x .- back1(x)
+        end
+        back2(grad)
+    end
+end
+
+function ctmrg(a, rt, χ, D; tol = 1e-12, maxit = 100)
+    for i in 1 : maxit
+        rtold = rt
+        rt = step(rt, a, χ, D) # gauge fix
+        println(norm.(rt .- rtold))
+    end
+    rt
+end
+
+@Zygote.adjoint function ctmrg(a, rt, χ, D; args...)
+    rt = ctmrg(a, rt, χ, D; args...)
+    rt, Δ -> (nothing, nothing, fixedpointbackward(step, rt, a, χ, D)(Δ)...)
 end
 
 function energy(h, ipeps, χ; tol = 1e-12, maxit = 100)
@@ -114,7 +132,7 @@ function vipeps(ipeps, h; χ = 30, tol = 1e-12, f_tol = 1e-8, maxit = 100)
 end
 
 function main()
-    ipeps = symmetrize(randn(ComplexF64, dim, dim, dim, dim, 2))
+    ipeps = symmetrize(randn(dim, dim, dim, dim, 2))
     σx = [0.0 1.0; 1.0 0.0]
     σy = [0.0 -1.0im; 1.0im 0.0]
     σz = [1.0 0.0; 0.0 -1.0]
